@@ -1,4 +1,4 @@
-# Script maestro corregido para replicar Tablas 1, 2, 3 y Figura 1 del paper de Sadoon et al. (2019)
+# Script para replicar Tablas 1, 2, 3 y Figura 1 del paper de Sadoon et al. (2019)
 
 import numpy as np
 import pandas as pd
@@ -8,6 +8,7 @@ import contextlib
 import os
 import sys
 from scipy import stats
+from datetime import datetime
 
 # ------------------- Silenciar prints -------------------
 @contextlib.contextmanager
@@ -32,7 +33,7 @@ N_values = [500, 5000]
 selection_models = ['A', 'B']
 reps = 500
 
-# ------------------- Generador de datos corregido -------------------
+# ------------------- Generador de datos -------------------
 def generate_panel_data(N, rho, selection_type, T_total=T_total_default,
                         selection_rate=0.85,
                         sigma_alpha_ratio=1,
@@ -43,7 +44,7 @@ def generate_panel_data(N, rho, selection_type, T_total=T_total_default,
     # Parámetros base (como en el paper)
     sigma_eta = 1
     sigma_u = 1
-    sigma_alpha0 = sigma_alpha_ratio  # Ajustado
+    sigma_alpha0 = sigma_alpha_ratio
     sigma_epsilon0 = 1
 
     # Generar componentes base independientes
@@ -55,7 +56,7 @@ def generate_panel_data(N, rho, selection_type, T_total=T_total_default,
     u = np.random.normal(0, sigma_u, (N, T_total))
     epsilon0 = np.random.normal(0, sigma_epsilon0, (N, T_total))
     
-    # Correlaciones correctas según el paper (sección 3.1)
+    # Correlaciones
     if correlation > 0:
         # αi = α0i + θ0ηi, εit = ε0it + ϑ0uit con θ0 = ϑ0 = 0.5 para corr = 0.447
         correlation_param = 0.5 if abs(correlation - 0.447) < 0.01 else 0.25  # 0.25 para corr ≈ 0.242
@@ -65,13 +66,13 @@ def generate_panel_data(N, rho, selection_type, T_total=T_total_default,
         alpha_i = alpha0_i
         epsilon = epsilon0
     
-    # No estacionario (opcional)
+    # No estacionario
     if non_stationary:
         scaling = np.random.binomial(1, 0.5, size=(N, T_total)) + 1  # 1 o 2
         epsilon *= scaling
         u *= scaling
 
-    # Generar y*it (ecuación 43-44 del paper)
+    # Generar y*it
     y = np.zeros((N, T_total))
     # Condición inicial (t=1): y*i1 = (2 + αi + εi1)/(1 - ρ)
     y[:, 0] = (2 + alpha_i + epsilon[:, 0]) / (1 - rho)
@@ -82,7 +83,7 @@ def generate_panel_data(N, rho, selection_type, T_total=T_total_default,
     # Calibrar constante 'a' para lograr la tasa de selección deseada
     a = stats.norm.ppf(selection_rate)  # P(d*it > 0) = selection_rate
     
-    # Proceso de selección corregido
+    # Proceso de selección
     d = np.zeros((N, T_total))
     d_star = np.zeros((N, T_total))
     
@@ -142,7 +143,7 @@ def generate_panel_data(N, rho, selection_type, T_total=T_total_default,
     
     return pd.DataFrame(panel)
 
-# ------------------- Extraer coeficientes corregido -------------------
+# ------------------- Extraer coeficientes -------------------
 def get_coefs(model, variable='L1.n'):
     """Extrae coeficiente y error estándar de la regresión"""
     try:
@@ -156,6 +157,11 @@ def get_coefs(model, variable='L1.n'):
             return np.nan, np.nan
     except Exception:
         return np.nan, np.nan
+    
+
+def get_timestamp():
+    """Retorna timestamp formateado para logging"""
+    return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
 # ------------------- Función de simulación -------------------
 def run_simulation(N, rho, sel_model, expt_label='',
@@ -176,7 +182,7 @@ def run_simulation(N, rho, sel_model, expt_label='',
     verbose = expt_label != 'figure1'
     
     if verbose:
-        print(f"  Simulando: {expt_label} N={N} ρ={rho} Modelo={sel_model} ({num_reps} reps)")
+        print(f"  Simulando: {expt_label} N={N} ρ={rho} Modelo={sel_model} ({num_reps} reps) [{get_timestamp()}]")
     
     for rep in range(num_reps):
         if verbose and rep % 100 == 0 and rep > 0:
@@ -307,10 +313,9 @@ experiments = [
 
 # ------------------- Experimento especial para Figura 1 -------------------
 def run_figure1_simulation():
-    """Simulación especial para Figura 1 con muchos tamaños de muestra"""
-    print("\n--- SIMULACIÓN ESPECIAL PARA FIGURA 1 ---")
+    """Simulación especial para Figura 1 con muchos varios tamaños de muestra."""
     
-    # Tamaños de muestra para la figura (como en el paper)
+    # Tamaños de muestra para la figura
     N_figure = [200, 400, 600, 800, 1000, 1200, 1400, 1600, 1800, 2000, 2200, 2400, 2600, 2800, 3000, 3200, 3400, 3600, 3800, 4000, 4200, 4400, 4600, 4800, 5000]
     rho_figure = [0.25, 0.5, 0.75]
     reps_figure = 500 
@@ -329,7 +334,7 @@ def run_figure1_simulation():
                 
                 # Mostrar progreso cada 10 simulaciones
                 if current_sim % 10 == 0 or current_sim == 1:
-                    print(f"  [{current_sim}/{total_sims}] N={N}, ρ={rho}, Modelo={sel_model}")
+                    print(f"  [{current_sim}/{total_sims}] N={N}, ρ={rho}, Modelo={sel_model} [{get_timestamp()}]")
 
                 res = run_simulation(N, rho, sel_model, 
                                    expt_label='figure1',
@@ -344,12 +349,12 @@ def run_figure1_simulation():
                 res['expt'] = 'figure1'
                 figure_results.append(res)
     
-    print(f"Figura 1 completada con {reps_figure} reps cada una")
+    print(f"Figura 1 completada con {reps_figure} reps cada una [{get_timestamp()}]")
     return figure_results
 
 # ------------------- Ejecutar simulaciones -------------------
 print("="*80)
-print("REPLICACIÓN SADOON ET AL. (2019)")
+print(f"REPLICACIÓN SADOON ET AL. (2019) - INICIO: {get_timestamp()}")
 print(f"Semilla: {3649} | Replicaciones por experimento: {reps}")
 print("="*80)
 
@@ -360,7 +365,7 @@ total_experiments = len(experiments) * len(N_values) * len(rho_values) * len(sel
 current_exp = 0
 
 for expt in experiments:
-    print(f"\n--- EXPERIMENTO: {expt['label'].upper()} ---")
+    print(f"\n--- EXPERIMENTO: {expt['label'].upper()} --- [{get_timestamp()}]")
     for N in N_values:
         for rho in rho_values:
             for sel_model in selection_models:
@@ -378,8 +383,8 @@ for expt in experiments:
 
 # 2. SIMULACIÓN ESPECIAL PARA FIGURA 1
 print(f"\n{'='*80}")
-print("EJECUTANDO SIMULACIÓN ESPECIAL PARA FIGURA 1")
-print("(Muchos tamaños de muestra para obtener líneas suaves)")
+print(f"EJECUTANDO SIMULACIÓN ESPECIAL PARA FIGURA 1 - INICIO: {get_timestamp()}")
+print("(Varios tamaños de muestra para obtener líneas suaves)")
 print(f"{'='*80}")
 
 figure_results = run_figure1_simulation()
@@ -388,11 +393,11 @@ all_results.extend(figure_results)
 # ------------------- Guardar resultados -------------------
 df_all = pd.DataFrame(all_results)
 df_all = df_all.round(5)  # Redondear para prolijidad
-df_all.to_csv('resultados_sadoon_corregido.csv', index=False)
+df_all.to_csv('resultados_simulación.csv', index=False)
 
 print("\n" + "="*80)
-print("SIMULACIONES COMPLETADAS")
-print(f"Resultados guardados en 'resultados_sadoon_corregido.csv'")
+print(f"SIMULACIONES COMPLETADAS - FIN: {get_timestamp()}")
+print(f"Resultados guardados en 'resultados_simulación.csv'")
 print(f"Total de experimentos: {len(df_all)}")
 print("Experimentos incluidos:")
 for exp_name in df_all['expt'].unique():
@@ -400,28 +405,12 @@ for exp_name in df_all['expt'].unique():
     print(f"   - {exp_name}: {count} configuraciones")
 print("="*80)
 
-# # Mostrar resumen de resultados principales
-# print("\nRESUMEN - EXPERIMENTOS PRINCIPALES:")
-# main_experiments = df_all[df_all['expt'].isin(['no_endogenous', 'baseline'])]
-# summary_cols = ['expt', 'N', 'rho', 'selection', 'AB_bias', 'SYS_bias', 'AB_reps', 'SYS_reps', 'total_reps']
-# print(main_experiments[summary_cols].to_string(index=False))
-
-# print(f"\nRESUMEN DE REPLICACIONES:")
-# print(f"✅ Experimentos principales (Tablas 1-3): {reps} replicaciones por configuración")
-
-figure_data = df_all[df_all['expt'] == 'figure1']
-if len(figure_data) > 0:
-    avg_reps = figure_data['total_reps'].iloc[0] if 'total_reps' in figure_data.columns else 100
-    print(f"⚡ Experimento Figura 1: {avg_reps} replicaciones por configuración (acelerado)")
-    time_saved_pct = (1 - avg_reps/reps) * 100
-    print(f"💾 Tiempo ahorrado en Figura 1: ~{time_saved_pct:.0f}%")
-
 import subprocess
 
 # ------------------- Subida automática a Cloud Storage -------------------
 try:
     bucket_name = "mecmt09-bucket"
-    output_file = "resultados_sadoon_corregido.csv"
+    output_file = "resultados_simulación.csv"
     destino = f"gs://{bucket_name}/{output_file}"
     
     print(f"\n🚀 Subiendo {output_file} a {destino}...")
@@ -435,7 +424,7 @@ try:
     print("⏻ Apagando la instancia de Compute Engine...")
     subprocess.run([
         "gcloud", "compute", "instances", "stop", 
-        "mecmt09-vm", "--zone", "us-central1-c"
+        "mecmt09-fast-vm", "--zone", "us-central1-c"
     ], check=True)
 except Exception as e:
     print("⚠ Error al intentar apagar la VM:", e)
