@@ -3,13 +3,13 @@
 import numpy as np
 import pandas as pd
 from pydynpd import regression
+import matplotlib.pyplot as plt
 import contextlib
 import os
 import sys
 from scipy import stats
 from datetime import datetime
 import multiprocessing as mp
-import subprocess
 
 # ------------------- Silenciar prints -------------------
 @contextlib.contextmanager
@@ -28,7 +28,7 @@ def suppress_output():
 # ------------------- Configuración global -------------------
 seed = int('03649')
 np.random.seed(seed)
-T_total_default = 21 
+T_total_default = 20 
 T_drop = 13
 rho_values = [0.25, 0.5, 0.75]
 N_values = [500, 5000]
@@ -86,8 +86,11 @@ def generate_panel_data(N, rho, selection_type, T_total=T_total_default,
     for t in range(1, T_total):
         y[:, t] = 2 + rho * y[:, t - 1] + alpha_i + epsilon[:, t]
 
-    # Calibrar constante 'a' para lograr la tasa de selección deseada
-    a = stats.norm.ppf(selection_rate)  # P(d*it > 0) = selection_rate
+    # Calibrar constante 'a' para lograr la tasa de selección deseada # P(d*it > 0) = selection_rate
+    if selection_type == 'A':
+        a = stats.norm.ppf(selection_rate) * 1.732  # sqrt(3)
+    elif selection_type == 'B':
+        a = stats.norm.ppf(selection_rate) * 1.85  
     
     # Proceso de selección
     d = np.zeros((N, T_total))
@@ -111,33 +114,39 @@ def generate_panel_data(N, rho, selection_type, T_total=T_total_default,
     else:
         raise ValueError("Tipo de selección debe ser 'A' o 'B'")
 
-    # Descartar primeras T_drop observaciones
-    y_final = y[:, T_drop:]
-    d_final = d[:, T_drop:]
-    T_effective = T_total - T_drop
-
-    # Ajustar requisitos según el experimento
+    # Ajuste específico para short_T
     if experiment_label == 'short_T':
-        start_t = 1  # Empezar desde t=1 en lugar de t=2
+        start_t = 1
+        T_drop_adj = 14 
+        min_consecutive = 2 
     else:
-        start_t = 2  # Empezar desde t=2 (normal)
-    
+        start_t = 2
+        T_drop_adj = T_drop  
+        min_consecutive = 3
+
+    # Descartar primeras T_drop_adj observaciones
+    y_final = y[:, T_drop_adj:]
+    d_final = d[:, T_drop_adj:]
+    T_effective = T_total - T_drop_adj
+
     # Crear panel balanceado
+    start_t = start_t
+
     panel = []
     for i in range(N):
         for t in range(start_t, T_effective):
-            if experiment_label == 'short_T':
-                # Para T corto: solo verificar 2 períodos consecutivos
-                if t >= 1 and d_final[i, t] == d_final[i, t-1] == 1:
+            if min_consecutive == 2:
+                # Solo 2 períodos consecutivos
+                if d_final[i, t] == d_final[i, t-1] == 1:
                     panel.append({
                         'id': i + 1,
                         'year': t + 1,
                         'n': y_final[i, t],
                         'L1.n': y_final[i, t-1],
-                        'L2.n': y_final[i, t-2] if t >= 2 else y_final[i, t-1],  # Duplicar si no hay L2
+                        'L2.n': y_final[i, t-2] if t >= 2 else y_final[i, t-1],
                     })
             else:
-                # Para experimentos normales: verificar 3 períodos consecutivos
+                # 3 períodos consecutivos (caso normal)
                 if d_final[i, t] == d_final[i, t-1] == d_final[i, t-2] == 1:
                     panel.append({
                         'id': i + 1,
@@ -146,7 +155,7 @@ def generate_panel_data(N, rho, selection_type, T_total=T_total_default,
                         'L1.n': y_final[i, t-1],
                         'L2.n': y_final[i, t-2],
                     })
-    
+
     return pd.DataFrame(panel)
 
 # ------------------- Extraer coeficientes -------------------
@@ -186,15 +195,15 @@ def run_single_replication(args):
                                  experiment_label=expt_label,
                                  seed_offset=rep_id * 1000)  # Semilla única
         
-        min_obs = 10 if expt_label != 'short_T' else 5
+        min_obs = 10 if expt_label != 'short_T' else 3
         
         if len(df) < min_obs:
             return None
             
         with suppress_output():
-            model_ab = regression.abond('n L1.n | gmm(n, 3:99) | nolevel', 
+            model_ab = regression.abond('n L1.n | gmm(n, 2:99) | nolevel', 
                                       df, ['id', 'year'])
-            model_sys = regression.abond('n L1.n | gmm(n, 3:99)', 
+            model_sys = regression.abond('n L1.n | gmm(n, 2:99)', 
                                        df, ['id', 'year'])
         
         ab_coef, ab_se = get_coefs(model_ab, 'L1.n')
@@ -240,7 +249,7 @@ def run_simulation(N, rho, sel_model, expt_label='',
         args_list.append(args)
     
     # Determinar número de cores a usar
-    cores = min(mp.cpu_count(), 8)  # Limitar a 8 cores máximo
+    cores = min(mp.cpu_count(), 18)
     
     # Ejecutar en paralelo
     with mp.Pool(processes=cores) as pool:
@@ -292,7 +301,7 @@ experiments = [
     # TABLA 1 - Parte 1: Sin selección endógena
     {
         'label': 'no_endogenous', 
-        'T_total': 21,
+        'T_total': 20,
         'selection_rate': 0.85, 
         'sigma_alpha_ratio': 1, 
         'correlation': 0.0,  # SIN correlación
@@ -301,7 +310,7 @@ experiments = [
     # TABLA 1 - Parte 2: Con selección endógena (baseline)
     {
         'label': 'baseline', 
-        'T_total': 21,
+        'T_total': 20,
         'selection_rate': 0.85, 
         'sigma_alpha_ratio': 1, 
         'correlation': 0.447,  # CON correlación
@@ -318,7 +327,7 @@ experiments = [
     },
     {
         'label': 'more_selection', 
-        'T_total': 21, 
+        'T_total': 20, 
         'selection_rate': 0.75,  # 25% selección (Experimento II)
         'sigma_alpha_ratio': 1, 
         'correlation': 0.447, 
@@ -326,7 +335,7 @@ experiments = [
     },
     {
         'label': 'high_alpha_ratio', 
-        'T_total': 21, 
+        'T_total': 20, 
         'selection_rate': 0.85, 
         'sigma_alpha_ratio': 2,  # ση/σε = 2 (Experimento III)
         'correlation': 0.447, 
@@ -334,7 +343,7 @@ experiments = [
     },
     {
         'label': 'low_corr', 
-        'T_total': 21, 
+        'T_total': 20, 
         'selection_rate': 0.85, 
         'sigma_alpha_ratio': 1, 
         'correlation': 0.242,  # ρ = 0.25 (Experimento IV)
@@ -342,7 +351,7 @@ experiments = [
     },
     {
         'label': 'nonstationary', 
-        'T_total': 21, 
+        'T_total': 20, 
         'selection_rate': 0.85, 
         'sigma_alpha_ratio': 1, 
         'correlation': 0.447, 
@@ -377,7 +386,7 @@ def run_figure1_simulation():
 
                 res = run_simulation(N, rho, sel_model, 
                                    expt_label='figure1',
-                                   T_total=21,
+                                   T_total=20,
                                    selection_rate=0.85,
                                    sigma_alpha_ratio=1,
                                    correlation=0.447,
@@ -433,11 +442,11 @@ all_results.extend(figure_results)
 # ------------------- Guardar resultados -------------------
 df_all = pd.DataFrame(all_results)
 df_all = df_all.round(5)  # Redondear para prolijidad
-df_all.to_csv('resultados_simulación_paralelo_v3.csv', index=False)
+df_all.to_csv('resultados_v2.csv', index=False)
 
 print("\n" + "="*80)
 print(f"SIMULACIONES COMPLETADAS - FIN: {get_timestamp()}")
-print(f"Resultados guardados en 'resultados_simulación_paralelo_v3.csv'")
+print(f"Resultados guardados en 'resultados_v2.csv'")
 print(f"Total de experimentos: {len(df_all)}")
 print("Experimentos incluidos:")
 for exp_name in df_all['expt'].unique():
