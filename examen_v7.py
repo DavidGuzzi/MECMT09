@@ -3,7 +3,6 @@
 import numpy as np
 import pandas as pd
 from pydynpd import regression
-import matplotlib.pyplot as plt
 import contextlib
 import os
 import sys
